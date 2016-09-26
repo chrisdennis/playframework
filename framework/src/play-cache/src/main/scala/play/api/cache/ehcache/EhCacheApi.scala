@@ -3,21 +3,24 @@
  */
 package play.api.cache.ehcache
 
-import javax.inject.{ Inject, Provider, Singleton }
+import javax.inject.{Inject, Provider, Singleton}
 
 import akka.Done
 import akka.stream.Materializer
 import com.google.common.primitives.Primitives
-import javax.cache.{ Cache, CacheException, CacheManager, Caching }
-import javax.cache.configuration.{ MutableConfiguration }
+import org.ehcache.expiry.Expiry
+import javax.cache.{Cache, CacheException, CacheManager, Caching}
+import javax.cache.configuration.MutableConfiguration
 
+import org.ehcache.ValueSupplier
+import org.ehcache.xml.XmlConfiguration
 import play.api.cache._
-import play.api.inject.{ ApplicationLifecycle, BindingKey, Injector, Module }
-import play.api.{ Configuration, Environment }
-import play.cache.{ NamedCacheImpl, AsyncCacheApi => JavaAsyncCacheApi, CacheApi => JavaCacheApi, DefaultAsyncCacheApi => DefaultJavaAsyncCacheApi, DefaultSyncCacheApi => JavaDefaultSyncCacheApi, SyncCacheApi => JavaSyncCacheApi }
+import play.api.inject.{ApplicationLifecycle, BindingKey, Injector, Module}
+import play.api.{Configuration, Environment}
+import play.cache.{NamedCacheImpl, AsyncCacheApi => JavaAsyncCacheApi, CacheApi => JavaCacheApi, DefaultAsyncCacheApi => DefaultJavaAsyncCacheApi, DefaultSyncCacheApi => JavaDefaultSyncCacheApi, SyncCacheApi => JavaSyncCacheApi}
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.duration.{Duration, FiniteDuration}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.reflect.ClassTag
 
 /**
@@ -91,12 +94,44 @@ class EhCacheModule extends Module {
 
 case class CachedValue[A](value: A, expiration: Duration)
 
+class PlayCachingExpiry[A, B] (delegate: Expiry[A, B]) extends Expiry[A, B] {
+
+  override def getExpiryForAccess(key: A, supplier: ValueSupplier[_ <: B]): org.ehcache.expiry.Duration = {
+    delegate.getExpiryForAccess(key, supplier)
+  }
+
+  override def getExpiryForUpdate(key: A, oldValue: ValueSupplier[_ <: B], newValue: B): org.ehcache.expiry.Duration = {
+    newValue match {
+      case lifespan : Duration =>
+        lifespan match {
+          case finite: FiniteDuration => org.ehcache.expiry.Duration.of(finite.length, finite.unit)
+          case infinite: Duration => org.ehcache.expiry.Duration.INFINITE
+        }
+      case _ => delegate.getExpiryForUpdate(key, oldValue, newValue)
+    }
+  }
+
+  override def getExpiryForCreation(key: A, value: B): org.ehcache.expiry.Duration = {
+    value match {
+      case lifespan : Duration =>
+        lifespan match {
+          case finite: FiniteDuration => org.ehcache.expiry.Duration.of(finite.length, finite.unit)
+          case infinite: Duration => org.ehcache.expiry.Duration.INFINITE
+        }
+      case _ => delegate.getExpiryForCreation(key, value)
+    }
+  }
+}
+
 @Singleton
 class CacheManagerProvider @Inject() (env: Environment, config: Configuration, lifecycle: ApplicationLifecycle) extends Provider[CacheManager] {
   lazy val get: CacheManager = {
     val resourceName = config.underlying.getString("play.cache.configResource")
     val provider = Caching.getCachingProvider
     val configUri = env.resource(resourceName).map(_.toURI).getOrElse(provider.getDefaultURI)
+    val configuration = new XmlConfiguration(configUri.toURL)
+    configuration.getCacheConfigurations().
+    //need to intercept the configuration and modify the expiry policies
     val manager = provider.getCacheManager(configUri, env.classLoader) //whose default?
     lifecycle.addStopHook(() => Future.successful(manager.close()))
     manager
