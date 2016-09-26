@@ -268,7 +268,8 @@ object Dependencies {
   ) ++ guiceDeps
 
   val playCacheDeps = Seq(
-      "net.sf.ehcache" % "ehcache-core" % "2.6.11",
+      "javax.cache" % "cache-api" % "1.0.0",
+      "org.ehcache" % "ehcache" % "3.1.2" % Test,
       logback % Test
     ) ++ specsBuild.map(_ % Test)
 

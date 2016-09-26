@@ -1,14 +1,16 @@
 package play.api.cache
 
 import javax.inject.{ Inject, Provider }
+import javax.cache.CacheManager
+import javax.cache.configuration.MutableConfiguration
 
-import net.sf.ehcache.CacheManager
 import play.api.cache.ehcache.CacheManagerProvider
 import play.api.inject._
 import play.api.test.{ PlaySpecification, WithApplication }
-import scala.concurrent.duration._
 
-import scala.concurrent.{ Future, Await }
+import scala.collection.JavaConversions._
+import scala.concurrent.duration._
+import scala.concurrent.{ Await, Future }
 
 class CacheApiSpec extends PlaySpecification {
   sequential
@@ -44,8 +46,8 @@ class CacheApiSpec extends PlaySpecification {
 class CustomCacheManagerProvider @Inject() (cacheManagerProvider: CacheManagerProvider) extends Provider[CacheManager] {
   lazy val get = {
     val mgr = cacheManagerProvider.get
-    mgr.removalAll()
-    mgr.addCache("custom")
+    mgr.getCacheNames().foreach { mgr.destroyCache(_) }
+    mgr.createCache("custom", new MutableConfiguration())
     mgr
   }
 }

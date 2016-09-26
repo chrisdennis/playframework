@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.inject._
 
 import play.api.cache.ehcache.EhCacheApi
+import play.api.cache.ehcache.CachedValue
 import play.api.{ Application, http }
 import play.api.mvc.{ Action, Request, Results }
 import play.api.test._
@@ -60,23 +61,15 @@ class CachedSpec extends PlaySpecification {
     }
 
     "cache values to disk using injected CachedApi" in new WithApplication() {
-      import net.sf.ehcache._
-      import net.sf.ehcache.config._
-      import net.sf.ehcache.store.MemoryStoreEvictionPolicy
+      import javax.cache._
+      import javax.cache.configuration._
+      import javax.cache.expiry._
       // FIXME: Do this properly
       val cacheManager = app.injector.instanceOf[CacheManager]
-      val diskEhcache = new Cache(
-        new CacheConfiguration("disk", 30)
-          .memoryStoreEvictionPolicy(MemoryStoreEvictionPolicy.LFU)
-          .eternal(false)
-          .timeToLiveSeconds(60)
-          .timeToIdleSeconds(30)
-          .diskExpiryThreadIntervalSeconds(0)
-          .persistence(new PersistenceConfiguration().strategy(PersistenceConfiguration.Strategy.LOCALTEMPSWAP)))
-      cacheManager.addCache(diskEhcache)
-      val diskEhcache2 = cacheManager.getCache("disk")
-      assert(diskEhcache2 != null)
-      val diskCache = new EhCacheApi(diskEhcache2)(app.materializer.executionContext)
+      val configuration = new MutableConfiguration()
+      configuration.setExpiryPolicyFactory(CreatedExpiryPolicy.factoryOf(Duration.ONE_MINUTE))
+      val diskEhcache = cacheManager.createCache("disk", configuration).asInstanceOf[Cache[String, CachedValue[Any]]]
+      val diskCache = new EhCacheApi(diskEhcache)(app.materializer.executionContext)
       val diskCached = new Cached(diskCache)
       val invoked = new AtomicInteger()
       val action = diskCached(_ => "foo")(Action(Results.Ok("" + invoked.incrementAndGet())))
